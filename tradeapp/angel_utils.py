@@ -1,10 +1,27 @@
 import SmartApi.smartConnect as smart
 import logging
 import time
+import os
+import redis
 from datetime import datetime, timedelta
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+# --- SHARED REDIS CONNECTION HELPER ---
+def get_redis_client():
+    """
+    Returns a Redis client that works on both Localhost and Heroku.
+    """
+    redis_url = os.environ.get('REDIS_URL')
+    
+    if redis_url:
+        # Heroku Connection
+        # ssl_cert_reqs=None is often needed for Heroku's self-signed certs
+        return redis.from_url(redis_url, decode_responses=True, ssl_cert_reqs=None)
+    else:
+        # Localhost Connection
+        return redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
 class AngelConnect:
     def __init__(self, api_key, access_token=None, refresh_token=None, feed_token=None):
@@ -59,12 +76,9 @@ class AngelConnect:
             return None
 
     def get_historical_data(self, token, interval="ONE_DAY"):
-        """
-        Fetches historical data to calculate Previous Day High/Low.
-        """
         try:
             to_date = datetime.now()
-            from_date = to_date - timedelta(days=5) # Get last 5 days to ensure we find a trading day
+            from_date = to_date - timedelta(days=5) 
             
             params = {
                 "exchange": "NSE",

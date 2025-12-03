@@ -1,8 +1,7 @@
 from django.core.management.base import BaseCommand
 from tradeapp.models import APICredential
-from tradeapp.angel_utils import AngelConnect
+from tradeapp.angel_utils import AngelConnect, get_redis_client
 from tradeapp.constants import FINAL_DICTIONARY_OBJECT
-import redis
 import json
 import time
 import logging
@@ -13,7 +12,9 @@ class Command(BaseCommand):
     help = 'Fetches Previous Day High (PDH) and Low (PDL) for the stock universe and caches in Redis.'
 
     def handle(self, *args, **options):
-        r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        # FIX: Use helper instead of localhost hardcoding
+        r = get_redis_client()
+        
         creds = APICredential.objects.first()
         
         if not creds:

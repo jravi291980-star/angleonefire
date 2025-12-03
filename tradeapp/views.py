@@ -1,24 +1,19 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
-from django.forms.models import model_to_dict
 from .models import APICredential, Trade, StrategySettings
 import json
 
 @login_required
 def dashboard(request):
-    # 1. AJAX Handler (For Auto-Refresh)
     if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.GET.get('format') == 'json':
         
-        # Helper to format dates
         def fmt_date(dt): return dt.strftime('%H:%M') if dt else '--'
         
-        # Fetch Data
         open_positions = Trade.objects.filter(user=request.user, status__in=['OPEN', 'PENDING_EXIT']).order_by('-created_at')
         scanner_signals = Trade.objects.filter(user=request.user, status='PENDING').order_by('-created_at')
         trade_history = Trade.objects.filter(user=request.user, status__in=['CLOSED', 'EXPIRED', 'CANCELLED', 'FAILED_ENTRY']).order_by('-created_at')[:20]
 
-        # Serialize Data
         data = {
             'scanner': [{
                 'ts': fmt_date(t.candle_ts),
@@ -48,11 +43,9 @@ def dashboard(request):
         }
         return JsonResponse(data)
 
-    # 2. Standard Page Load (HTML)
     creds = APICredential.objects.filter(user=request.user).first()
     settings, _ = StrategySettings.objects.get_or_create(user=request.user)
     
-    # We pass empty querysets initially, JS will populate them instantly
     context = {
         'creds': creds,
         'settings': settings,
