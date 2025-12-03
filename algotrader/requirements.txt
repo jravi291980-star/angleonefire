@@ -1,0 +1,10 @@
+Django>=5.0
+redis>=5.0
+smartapi-python>=1.4.6
+psycopg2-binary>=2.9
+gunicorn>=21.2.0
+requests>=2.31
+tenacity>=8.2
+pytz>=2023.3
+websocket-client>=1.6.1
+django-heroku>=0.3.1

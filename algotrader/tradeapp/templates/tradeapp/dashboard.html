@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AngelAlgo Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Auto-refresh every 5 seconds to update Scanner/Positions -->
+    <meta http-equiv="refresh" content="5">
+</head>
+<body class="bg-gray-900 text-white font-sans text-sm">
+
+    <div class="container mx-auto p-4 max-w-7xl">
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-500">AngelAlgo <span class="text-white">Pro</span></h1>
+                <p class="text-gray-400 text-xs">Cash Breakout System</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                {% if creds.access_token %}
+                    <div class="flex items-center space-x-2 px-3 py-1 bg-green-900/30 border border-green-800 rounded-full">
+                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        <span class="text-green-300 text-xs font-semibold">API Connected</span>
+                    </div>
+                {% else %}
+                    <a href="{{ angel_login_url }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-xs font-bold transition">Connect Angel One</a>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Column: Settings & Credentials (3 cols) -->
+            <div class="lg:col-span-3 space-y-6">
+                
+                <!-- Credentials Widget -->
+                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                    <h2 class="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">API Credentials</h2>
+                    <form action="{% url 'save_credentials' %}" method="POST" class="space-y-3">
+                        {% csrf_token %}
+                        <input type="text" name="api_key" placeholder="API Key" value="{{ creds.api_key|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                        <input type="text" name="client_code" placeholder="Client Code" value="{{ creds.client_code|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                        <input type="password" name="secret_key" placeholder="Secret Key" value="{{ creds.secret_key|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                        <button type="submit" class="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 rounded text-xs font-semibold transition">Save Keys</button>
+                    </form>
+                </div>
+
+                <!-- Strategy Settings Widget -->
+                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                    <h2 class="text-sm font-semibold text-yellow-500 mb-3 uppercase tracking-wider">Strategy Config</h2>
+                    <form action="{% url 'save_settings' %}" method="POST" class="space-y-3">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-gray-500 text-xs mb-1">Risk Per Trade (₹)</label>
+                            <input type="number" name="sl_amount" value="{{ settings.per_trade_sl_amount }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs focus:border-yellow-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 text-xs mb-1">Max Trades/Day</label>
+                            <input type="number" name="max_trades" value="{{ settings.max_total_trades }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs focus:border-yellow-500 outline-none">
+                        </div>
+                        <div class="flex items-center justify-between pt-2">
+                            <label class="text-xs text-gray-300">Engine Active</label>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" name="active" class="sr-only peer" {% if settings.active %}checked{% endif %}>
+                                <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600"></div>
+                            </label>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-xs font-bold mt-2 transition">Update Settings</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Right Column: Dashboard Data (9 cols) -->
+            <div class="lg:col-span-9 space-y-6">
+
+                <!-- 1. LIVE SCANNER RESULTS -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                    <div class="bg-gray-750 px-4 py-3 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-sm font-bold text-purple-400 uppercase tracking-wide flex items-center">
+                            <span class="w-2 h-2 bg-purple-500 rounded-full mr-2 animate-ping"></span>
+                            Live Scanner / Watchlist
+                        </h2>
+                        <span class="text-xs text-gray-500">{{ scanner_signals.count }} Potential Setups</span>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-900 text-gray-500 text-xs uppercase">
+                                <tr>
+                                    <th class="px-4 py-3">Time</th>
+                                    <th class="px-4 py-3">Symbol</th>
+                                    <th class="px-4 py-3">PDH</th>
+                                    <th class="px-4 py-3">Current Range</th>
+                                    <th class="px-4 py-3 text-right">Breakout Level</th>
+                                    <th class="px-4 py-3 text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-700 text-gray-300 text-xs">
+                                {% for scan in scanner_signals %}
+                                <tr class="hover:bg-gray-700/50 transition">
+                                    <td class="px-4 py-3 text-gray-400">{{ scan.candle_ts|date:"H:i" }}</td>
+                                    <td class="px-4 py-3 font-bold text-white">{{ scan.symbol }}</td>
+                                    <td class="px-4 py-3">{{ scan.prev_day_high }}</td>
+                                    <td class="px-4 py-3">{{ scan.candle_low }} - {{ scan.candle_high }}</td>
+                                    <td class="px-4 py-3 text-right text-yellow-400 font-mono">{{ scan.entry_level|floatformat:2 }}</td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="inline-block px-2 py-1 bg-purple-900/40 text-purple-300 rounded border border-purple-800">Watching</span>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="px-4 py-8 text-center text-gray-500 italic">
+                                        Scanning market for breakouts above Previous Day High...
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. OPEN POSITIONS -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                    <div class="bg-gray-750 px-4 py-3 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-sm font-bold text-green-400 uppercase tracking-wide">Live Positions</h2>
+                        <span class="text-xs text-gray-500">{{ open_positions.count }} Active</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-900 text-gray-500 text-xs uppercase">
+                                <tr>
+                                    <th class="px-4 py-3">Symbol</th>
+                                    <th class="px-4 py-3">Qty</th>
+                                    <th class="px-4 py-3">Entry</th>
+                                    <th class="px-4 py-3">Stop Loss</th>
+                                    <th class="px-4 py-3">Target</th>
+                                    <th class="px-4 py-3">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-700 text-gray-300 text-xs">
+                                {% for pos in open_positions %}
+                                <tr class="hover:bg-gray-700/50 transition">
+                                    <td class="px-4 py-3 font-bold text-white">{{ pos.symbol }}</td>
+                                    <td class="px-4 py-3">{{ pos.quantity }}</td>
+                                    <td class="px-4 py-3 font-mono text-blue-300">{{ pos.entry_price|floatformat:2 }}</td>
+                                    <td class="px-4 py-3 font-mono text-red-400">{{ pos.stop_level|floatformat:2 }}</td>
+                                    <td class="px-4 py-3 font-mono text-green-400">{{ pos.target_level|floatformat:2 }}</td>
+                                    <td class="px-4 py-3">
+                                        <span class="inline-block px-2 py-1 bg-green-900/40 text-green-300 rounded border border-green-800">
+                                            {{ pos.status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="px-4 py-8 text-center text-gray-500 italic">
+                                        No open positions currently.
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 3. RECENT HISTORY -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                    <div class="bg-gray-750 px-4 py-3 border-b border-gray-700">
+                        <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wide">Recent Activity</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-gray-400 text-xs">
+                            <thead class="bg-gray-900/50">
+                                <tr>
+                                    <th class="px-4 py-2">Time</th>
+                                    <th class="px-4 py-2">Symbol</th>
+                                    <th class="px-4 py-2">Result</th>
+                                    <th class="px-4 py-2">PnL</th>
+                                    <th class="px-4 py-2">Note</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-700/50">
+                                {% for hist in trade_history %}
+                                <tr class="hover:bg-gray-700/30">
+                                    <td class="px-4 py-2">{{ hist.updated_at|date:"H:i" }}</td>
+                                    <td class="px-4 py-2 font-medium">{{ hist.symbol }}</td>
+                                    <td class="px-4 py-2">
+                                        {% if hist.status == 'CLOSED' %}
+                                            <span class="text-blue-400">Closed</span>
+                                        {% elif hist.status == 'EXPIRED' %}
+                                            <span class="text-gray-500">Expired</span>
+                                        {% else %}
+                                            <span class="text-red-400">{{ hist.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-4 py-2 font-mono {% if hist.pnl > 0 %}text-green-400{% elif hist.pnl < 0 %}text-red-400{% endif %}">
+                                        {{ hist.pnl|default:"--" }}
+                                    </td>
+                                    <td class="px-4 py-2 text-gray-500 italic truncate max-w-xs">{{ hist.exit_reason|default:hist.status }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="px-4 py-4 text-center text-gray-600 italic">No history yet.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
