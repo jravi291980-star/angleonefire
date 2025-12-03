@@ -12,7 +12,7 @@ class Command(BaseCommand):
     help = 'Fetches Previous Day High (PDH) and Low (PDL) for the stock universe and caches in Redis.'
 
     def handle(self, *args, **options):
-        # FIX: Use helper instead of localhost hardcoding
+        # FIX: Use helper function to detect Heroku vs Local Redis
         r = get_redis_client()
         
         creds = APICredential.objects.first()

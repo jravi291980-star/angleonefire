@@ -6,6 +6,7 @@ from tradeapp.angel_utils import get_redis_client
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 import json
 import logging
+import time
 from datetime import datetime
 import pytz
 
@@ -19,19 +20,25 @@ class Command(BaseCommand):
     help = 'Runs Central Data Engine: Aggregates Ticks -> 1 Min Candles -> Redis Stream'
 
     def handle(self, *args, **options):
-        # FIX: Use helper
         r = get_redis_client()
         
-        creds = APICredential.objects.first()
-        
-        if not creds:
-            self.stdout.write(self.style.ERROR('No Credentials Found'))
-            return
+        # 1. Wait for Credentials loop
+        while True:
+            creds = APICredential.objects.first()
+            if creds and creds.access_token and creds.feed_token:
+                break
+            self.stdout.write(self.style.WARNING('Waiting for valid Access Token & Feed Token...'))
+            time.sleep(5)
 
         token_map = {str(v): k for k, v in FINAL_DICTIONARY_OBJECT.items()}
         candle_buffer = {}
 
-        sws = SmartWebSocketV2(creds.access_token, creds.api_key, creds.client_code, creds.feed_token)
+        # 2. Initialize WebSocket (Now safe because we checked tokens)
+        try:
+            sws = SmartWebSocketV2(creds.access_token, creds.api_key, creds.client_code, creds.feed_token)
+        except Exception as e:
+            logger.error(f"Failed to init WebSocket: {e}")
+            return
 
         def get_current_minute_str():
             return datetime.now(IST).strftime('%Y-%m-%d %H:%M:00%z')
