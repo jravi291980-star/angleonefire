@@ -1,39 +1,63 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.forms.models import model_to_dict
 from .models import APICredential, Trade, StrategySettings
+import json
 
 @login_required
 def dashboard(request):
+    # 1. AJAX Handler (For Auto-Refresh)
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.GET.get('format') == 'json':
+        
+        # Helper to format dates
+        def fmt_date(dt): return dt.strftime('%H:%M') if dt else '--'
+        
+        # Fetch Data
+        open_positions = Trade.objects.filter(user=request.user, status__in=['OPEN', 'PENDING_EXIT']).order_by('-created_at')
+        scanner_signals = Trade.objects.filter(user=request.user, status='PENDING').order_by('-created_at')
+        trade_history = Trade.objects.filter(user=request.user, status__in=['CLOSED', 'EXPIRED', 'CANCELLED', 'FAILED_ENTRY']).order_by('-created_at')[:20]
+
+        # Serialize Data
+        data = {
+            'scanner': [{
+                'ts': fmt_date(t.candle_ts),
+                'symbol': t.symbol,
+                'pdh': float(t.prev_day_high or 0),
+                'range': f"{float(t.candle_low or 0)} - {float(t.candle_high or 0)}",
+                'level': float(t.entry_level),
+                'status': 'Watching'
+            } for t in scanner_signals],
+            
+            'positions': [{
+                'symbol': t.symbol,
+                'qty': t.quantity,
+                'entry': float(t.entry_price or 0),
+                'stop': float(t.stop_level),
+                'target': float(t.target_level),
+                'status': t.status
+            } for t in open_positions],
+            
+            'history': [{
+                'time': fmt_date(t.updated_at),
+                'symbol': t.symbol,
+                'status': t.status,
+                'pnl': float(t.pnl or 0),
+                'reason': t.exit_reason or t.status
+            } for t in trade_history]
+        }
+        return JsonResponse(data)
+
+    # 2. Standard Page Load (HTML)
     creds = APICredential.objects.filter(user=request.user).first()
     settings, _ = StrategySettings.objects.get_or_create(user=request.user)
     
-    # 1. Open Positions (Active Trades)
-    open_positions = Trade.objects.filter(
-        user=request.user, 
-        status__in=['OPEN', 'PENDING_EXIT']
-    ).order_by('-created_at')
-
-    # 2. Scanner Results (Pending Breakouts waiting for Trigger)
-    scanner_signals = Trade.objects.filter(
-        user=request.user, 
-        status='PENDING'
-    ).order_by('-created_at')
-
-    # 3. History (Closed/Expired/Cancelled)
-    trade_history = Trade.objects.filter(
-        user=request.user, 
-        status__in=['CLOSED', 'EXPIRED', 'CANCELLED', 'FAILED_ENTRY']
-    ).order_by('-created_at')[:20]
-    
+    # We pass empty querysets initially, JS will populate them instantly
     context = {
         'creds': creds,
         'settings': settings,
-        'open_positions': open_positions,
-        'scanner_signals': scanner_signals,
-        'trade_history': trade_history,
         'angel_login_url': f"https://smartapi.angelbroking.com/publisher-login?api_key={creds.api_key}" if creds else "#"
     }
-    # Note the updated template path
     return render(request, 'tradeapp/dashboard.html', context)
 
 @login_required
