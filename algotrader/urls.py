@@ -3,6 +3,6 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Include the tradeapp URLs
+    # This connects the root URL to your tradeapp
     path('', include('tradeapp.urls')),
 ]
