@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from .models import APICredential, Trade, StrategySettings
+import SmartApi.smartConnect as smart
 import json
 
 @login_required
@@ -82,23 +83,30 @@ def save_credentials(request):
 def angel_callback(request):
     auth_token = request.GET.get('auth_token')
     
-    # CHECK BOTH PARAMETER NAMES (CamelCase vs Snake_Case)
-    feed_token = request.GET.get('feedToken') or request.GET.get('feed_token')
-    refresh_token = request.GET.get('refreshToken') or request.GET.get('refresh_token')
-    
     if auth_token and request.user.is_authenticated:
         creds, _ = APICredential.objects.get_or_create(user=request.user)
         creds.access_token = auth_token
+        creds.save() # Save Access Token first
         
-        if feed_token:
-            creds.feed_token = feed_token
-        else:
-            # Fallback: If Angel still doesn't send it, use auth_token
-            # This is a safe fallback for WebSocket V2
-            creds.feed_token = auth_token
+        # --- CRITICAL FIX: Fetch Feed Token from Angel Server ---
+        try:
+            obj = smart.SmartConnect(api_key=creds.api_key)
+            obj.setAccessToken(auth_token)
             
-        if refresh_token:
-            creds.refresh_token = refresh_token
+            # This API call gets the REAL feed token
+            feed_token = obj.getfeedToken()
             
-        creds.save()
+            if feed_token:
+                creds.feed_token = feed_token
+                print(f"SUCCESS: Fetched Feed Token: {feed_token[:10]}...")
+            else:
+                print("WARNING: Angel returned None for feed token")
+                # Fallback only if server fails
+                creds.feed_token = auth_token 
+                
+            creds.save()
+            
+        except Exception as e:
+            print(f"ERROR Fetching Feed Token: {e}")
+            
     return redirect('dashboard')
