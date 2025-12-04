@@ -14,44 +14,41 @@ IST = pytz.timezone("Asia/Kolkata")
 CANDLE_STREAM_KEY = getattr(settings, "BREAKOUT_CANDLE_STREAM", "candle_1m")
 LIVE_OHLC_KEY = getattr(settings, "BREAKOUT_LIVE_OHLC_KEY", "live_ohlc_data")
 
+# Configure Logging to output to Heroku Console
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('data_engine')
 
 class Command(BaseCommand):
-    help = 'Runs Central Data Engine: Aggregates Ticks -> 1 Min Candles -> Redis Stream'
+    help = 'Runs Central Data Engine with Detail Logging'
 
     def handle(self, *args, **options):
         r = get_redis_client()
+        logger.info("--- DATA ENGINE INITIALIZED ---")
+        
         while True:
             try:
                 self.run_socket_session(r)
             except Exception as e:
-                logger.error(f"Data Engine Crash: {e}")
-            self.stdout.write(self.style.WARNING('Engine stopped. Restarting in 5 seconds...'))
+                logger.error(f"CRITICAL ENGINE CRASH: {e}")
+            
+            logger.warning('Engine stopped. Restarting in 5 seconds...')
             time.sleep(5)
 
     def run_socket_session(self, r):
         creds = APICredential.objects.first()
-        
-        # --- DEBUG LOGGING ---
-        if creds:
-            at_preview = creds.access_token[:10] + "..." if creds.access_token else "None"
-            ft_preview = creds.feed_token[:10] + "..." if creds.feed_token else "None"
-            print(f"DEBUG: AccessToken={at_preview}, FeedToken={ft_preview}")
-        else:
-            print("DEBUG: No Credentials Object found.")
-        # ---------------------
-
         if not creds or not creds.access_token or not creds.feed_token:
-            self.stdout.write(self.style.WARNING('Waiting for valid tokens...'))
+            logger.warning('Waiting for valid tokens... (Login via Dashboard)')
             return
 
         token_map = {str(v): k for k, v in FINAL_DICTIONARY_OBJECT.items()}
         candle_buffer = {}
 
         try:
+            # Log masked token for debugging
+            logger.info(f"Initializing WebSocket with FeedToken: {creds.feed_token[:10]}...")
             sws = SmartWebSocketV2(creds.access_token, creds.api_key, creds.client_code, creds.feed_token)
         except Exception as e:
-            logger.error(f"Init Error: {e}")
+            logger.error(f"WebSocket Init Failed: {e}")
             return
 
         def flush_candle(token, data):
@@ -61,12 +58,17 @@ class Command(BaseCommand):
                 "high": data['high'], "low": data['low'], "close": data['close'],
                 "volume": data['volume'], "ts": data['ts']
             }
+            # Push to Stream
             r.xadd(CANDLE_STREAM_KEY, {'data': json.dumps(payload)})
             
+            # Update Snapshot
             current_snapshot = r.get(LIVE_OHLC_KEY)
             snapshot_dict = json.loads(current_snapshot) if current_snapshot else {}
             snapshot_dict[symbol] = {"ltp": data['close'], "high": data['high'], "low": data['low']}
             r.set(LIVE_OHLC_KEY, json.dumps(snapshot_dict))
+            
+            # LOGGING: Show activity (Critical for debugging)
+            logger.info(f"🕯️ CANDLE: {symbol} | Time: {data['ts']} | Close: {data['close']}")
 
         def on_data(wsapp, message):
             try:
@@ -88,30 +90,34 @@ class Command(BaseCommand):
                 
                 candle = candle_buffer[token]
 
+                # Minute Change Detection
                 if candle['ts'] != current_min:
                     prev_candle = candle.copy()
                     prev_candle['volume'] = daily_vol - candle['start_vol']
                     flush_candle(token, prev_candle)
                     
+                    # Reset for new minute
                     candle_buffer[token] = {
                         'open': ltp, 'high': ltp, 'low': ltp, 'close': ltp,
                         'volume': daily_vol, 'ts': current_min, 'start_vol': daily_vol
                     }
                 else:
+                    # Update High/Low/Close
                     candle['high'] = max(candle['high'], ltp)
                     candle['low'] = min(candle['low'], ltp)
                     candle['close'] = ltp
-            except Exception:
-                pass
+                    
+            except Exception as e:
+                logger.error(f"Tick Process Error: {e}")
 
         def on_open(wsapp):
-            logger.info("WebSocket Connected")
+            logger.info("✅ WebSocket Connected Successfully")
             tokens = list(token_map.keys())
             sws.subscribe("correlation_id", 2, [{"exchangeType": 1, "tokens": tokens}])
-            self.stdout.write(self.style.SUCCESS(f'Subscribed to {len(tokens)} stocks (Mode 2).'))
+            logger.info(f"📡 Subscribed to {len(tokens)} stocks in MODE 2 (Quote).")
 
         def on_error(wsapp, error):
-            logger.error(f"WebSocket Error: {error}")
+            logger.error(f"❌ WebSocket Error: {error}")
 
         sws.on_data = on_data
         sws.on_open = on_open
