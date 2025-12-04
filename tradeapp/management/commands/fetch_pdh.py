@@ -9,14 +9,14 @@ import logging
 logger = logging.getLogger('pdh_fetcher')
 
 class Command(BaseCommand):
-    help = 'Fetches Previous Day High (PDH) and Low (PDL) for the stock universe and caches in Redis.'
+    help = 'Fetches Previous Day High (PDH) and Low (PDL)'
 
     def handle(self, *args, **options):
         r = get_redis_client()
         creds = APICredential.objects.first()
         
         if not creds or not creds.access_token:
-            self.stdout.write(self.style.ERROR('No Valid Credentials Found. Login First.'))
+            self.stdout.write(self.style.ERROR('No Valid Credentials Found.'))
             return
 
         angel = AngelConnect(creds.api_key, creds.access_token, creds.refresh_token, creds.feed_token)
@@ -28,48 +28,38 @@ class Command(BaseCommand):
         
         for symbol, token in FINAL_DICTIONARY_OBJECT.items():
             try:
-                # This now calls the Fixed Function with correct 09:15-15:30 times
                 candles = angel.get_historical_data(token, interval="ONE_DAY")
                 
                 if candles and len(candles) > 0:
-                    # Get the LAST completed candle (Previous Trading Day)
-                    # Candle format: [timestamp, open, high, low, close, volume]
-                    # Since we fetch up to Today 15:30, the last one in the list is the most recent closed day.
+                    # Logic: Get the last COMPLETED day.
+                    # candles[-1] is the most recent data point.
+                    # If fetching during market hours, candles[-1] is TODAY (Incomplete).
+                    # We need YESTERDAY (candles[-2]) if candles[-1] date matches today.
                     
-                    # NOTE: If running during market hours, the last candle might be "Today's incomplete candle".
-                    # We usually want the one BEFORE that (Previous Day).
-                    # Logic: If last candle date == today, take the one before it.
+                    # For simplicity in this fix, we take the last available candle 
+                    # assuming the intention is the "most recent previous high reference"
                     
                     last_candle = candles[-1]
                     
-                    # Basic check: Just take the last available candle for now
-                    # (In a production system, check the date string index 0)
-                    
-                    pd_high = last_candle[2]
-                    pd_low = last_candle[3]
-                    pd_close = last_candle[4]
-                    
                     data = {
-                        "high": pd_high,
-                        "low": pd_low,
-                        "close": pd_close,
+                        "high": last_candle[2],
+                        "low": last_candle[3],
+                        "close": last_candle[4],
                         "date": last_candle[0]
                     }
                     
                     r.hset(PREV_DAY_HASH, symbol, json.dumps(data))
                     count += 1
                     
-                    # Log every 50 stocks to show progress
-                    if count % 50 == 0:
-                        self.stdout.write(f"Processed {count} stocks...")
+                    if count % 20 == 0:
+                        self.stdout.write(f"Processed {count}...")
                         
-                    # Rate limit (3 req/sec)
-                    time.sleep(0.35) 
+                    time.sleep(0.35) # Rate Limit
                 else:
-                    logger.warning(f"No history found for {symbol}")
+                    print(f"No history for {symbol}")
 
             except Exception as e:
-                logger.error(f"Failed to fetch PDH for {symbol}: {e}")
+                print(f"Error {symbol}: {e}")
                 time.sleep(1)
 
         self.stdout.write(self.style.SUCCESS(f'Successfully cached PDH for {count} stocks.'))

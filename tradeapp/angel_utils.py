@@ -3,10 +3,8 @@ import logging
 import time
 import os
 import redis
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from tenacity import retry, stop_after_attempt, wait_exponential
-
-# Import Models locally to avoid circular imports
 from django.apps import apps
 
 logger = logging.getLogger(__name__)
@@ -23,7 +21,6 @@ class AngelConnect:
         self.api_key = api_key
         self.client = smart.SmartConnect(api_key=self.api_key)
         
-        # Store tokens for refreshing later
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.feed_token = feed_token
@@ -34,29 +31,25 @@ class AngelConnect:
             self.client.setFeedToken(feed_token)
 
     def _refresh_and_save_token(self):
-        """
-        Internal method to refresh token using the refresh_token.
-        """
         if not self.refresh_token:
             print("❌ Cannot refresh: No refresh token available.")
             return False
 
         try:
             print("🔄 Attempting Token Refresh via API...")
-            # Attempt refresh
             data = self.client.generateToken(self.refresh_token)
             
-            if data['status']:
+            is_success = data.get('status', False) or data.get('success', False)
+            
+            if is_success:
                 new_access_token = data['data']['jwtToken']
                 new_feed_token = data['data']['feedToken']
                 new_refresh_token = data['data']['refreshToken']
                 
-                # Update Client
                 self.client.setAccessToken(new_access_token)
                 self.client.setFeedToken(new_feed_token)
                 self.client.setRefreshToken(new_refresh_token)
                 
-                # Save to Database
                 APICredential = apps.get_model('tradeapp', 'APICredential')
                 creds = APICredential.objects.first()
                 if creds:
@@ -67,9 +60,11 @@ class AngelConnect:
                     print("✅ Token Refreshed & Saved Successfully!")
                     return True
             else:
-                print(f"❌ Token Refresh Failed: {data['message']}")
+                msg = data.get('message', 'Unknown Error')
+                print(f"❌ Refresh Failed (Session Dead): {msg}")
+                
         except Exception as e:
-            print(f"❌ Exception during Token Refresh: {e}")
+            print(f"❌ Exception during Refresh: {e}")
         
         return False
 
@@ -77,69 +72,78 @@ class AngelConnect:
     def place_order(self, symbol_token, symbol, quantity, transaction_type, product_type="INTRADAY", order_type="MARKET", price=0.0):
         try:
             orderparams = {
-                "variety": "NORMAL",
-                "tradingsymbol": symbol,
-                "symboltoken": symbol_token,
-                "transactiontype": transaction_type,
-                "exchange": "NSE",
-                "ordertype": order_type,
-                "producttype": product_type,
-                "duration": "DAY",
-                "price": price,
-                "squareoff": "0",
-                "stoploss": "0",
-                "quantity": quantity
+                "variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": symbol_token,
+                "transactiontype": transaction_type, "exchange": "NSE", "ordertype": order_type,
+                "producttype": product_type, "duration": "DAY", 
+                "price": price, "squareoff": "0", "stoploss": "0", "quantity": quantity
             }
-            order_id = self.client.placeOrder(orderparams)
-            return order_id
+            try:
+                return self.client.placeOrder(orderparams)
+            except Exception as e:
+                if "Invalid Token" in str(e) and self._refresh_and_save_token():
+                    return self.client.placeOrder(orderparams)
+                raise e
         except Exception as e:
-            logger.error(f"Angel Utils: Place Order Failed: {e}")
+            logger.error(f"Order Failed: {e}")
             raise e
+
+    def get_order_status(self, order_id):
+        try:
+            book = self.client.orderBook()
+            if not book and self._refresh_and_save_token():
+                 book = self.client.orderBook()
+            if not book or 'data' not in book: return None
+            for order in book['data']:
+                if order['orderid'] == order_id:
+                    return {
+                        'status': order['orderstatus'],
+                        'filled_quantity': int(order.get('filledshares', 0)),
+                        'average_price': float(order.get('averageprice', 0.0))
+                    }
+            return None
+        except Exception:
+            return None
 
     def get_historical_data(self, token, interval="ONE_DAY"):
         """
-        Fetches historical data with Auto-Refresh Logic for AG8001 Errors.
-        Also clamps 'todate' to CURRENT TIME to avoid 'Future Date' errors.
+        Fetches historical data strictly up to YESTERDAY 15:30.
+        This ensures the last candle in the list is always the Previous Day High.
         """
         try:
             now = datetime.now()
             
-            # 1. Date Logic: Last 10 days
+            # 1. Start Date: 10 days ago
             from_date = now - timedelta(days=10)
             from_str = from_date.strftime("%Y-%m-%d 09:15")
             
-            # 2. Date Logic: If running during market hours, cap 'todate' to NOW
-            # Asking for 15:30 when it is 12:00 can cause AB1004 errors
-            to_str = now.strftime("%Y-%m-%d %H:%M") 
-            
+            # 2. End Date: Yesterday at 15:30
+            # Even if run on Monday, fetching last 10 days ending Sunday 15:30 works
+            # because the API will return data up to Friday 15:30.
+            yesterday = now - timedelta(days=1)
+            to_str = yesterday.strftime("%Y-%m-%d 15:30")
+
             params = {
-                "exchange": "NSE",
-                "symboltoken": token,
-                "interval": interval,
-                "fromdate": from_str,
-                "todate": to_str
+                "exchange": "NSE", "symboltoken": token, "interval": interval,
+                "fromdate": from_str, "todate": to_str
             }
             
-            # First Attempt
             data = self.client.getCandleData(params)
             
-            # 3. Auto-Refresh Logic (AG8001)
-            # If status is False AND (Error is AG8001 OR message says Invalid Token)
-            if not data.get('status') and (data.get('errorcode') == 'AG8001' or 'Invalid Token' in str(data.get('message'))):
-                print(f"⚠️ Token Expired for {token}. Initiating Auto-Refresh...")
-                
+            # Auto-Refresh Check
+            if not data.get('status') and (data.get('errorcode') == 'AG8001' or 'Invalid Token' in str(data.get('message', ''))):
+                print(f"⚠️ Token Expired for {token}. Attempting Refresh...")
                 if self._refresh_and_save_token():
-                    # Retry Request with new token
-                    data = self.client.getCandleData(params)
+                    data = self.client.getCandleData(params) # Retry
                     if data.get('status'):
                         print("✅ Retry Success!")
                     else:
-                        print(f"❌ Retry Failed: {data.get('message')}")
+                        print("❌ Retry Failed.")
                 else:
-                    print("❌ Refresh Failed. Please Login manually via Dashboard.")
+                    print("❌ Refresh Failed. MANUAL LOGIN REQUIRED.")
+                    return None
 
             return data['data'] if data and 'data' in data else None
             
         except Exception as e:
-            logger.error(f"Error fetching history for {token}: {e}")
+            logger.error(f"History Error {token}: {e}")
             return None
