@@ -33,12 +33,15 @@
                         {% csrf_token %}
                         <input type="text" name="api_key" placeholder="API Key" value="{{ creds.api_key|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white">
                         <input type="text" name="client_code" placeholder="Client Code" value="{{ creds.client_code|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white">
-                        <input type="password" name="password" placeholder="Angel Password" value="{{ creds.password|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white">
-                        <input type="password" name="totp_secret" placeholder="TOTP Secret (from GAuth)" value="{{ creds.totp_secret|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white">
+                        
+                        <!-- UPDATED FIELD: ASK FOR PIN, NOT PASSWORD -->
+                        <input type="password" name="password" placeholder="Angel MPIN (4-Digit PIN)" value="{{ creds.password|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white border-yellow-500/50">
+                        
+                        <input type="password" name="totp_secret" placeholder="TOTP Secret (e.g. JBSWY...)" value="{{ creds.totp_secret|default:'' }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white">
                         <button type="submit" class="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 rounded text-xs font-semibold">Save Credentials</button>
                     </form>
                 </div>
-                <!-- Strategy Settings Form (Same as before) -->
+                <!-- Strategy Settings Form -->
                 <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
                     <h2 class="text-sm font-semibold text-yellow-500 mb-3 uppercase">Strategy Config</h2>
                     <form action="{% url 'save_settings' %}" method="POST" class="space-y-3">
@@ -53,21 +56,19 @@
 
             <!-- Right Column: Data -->
             <div class="lg:col-span-9 space-y-6">
-                <!-- Scanner, Positions, History Tables (Same structure as before) -->
+                <!-- Tables -->
                 <div class="bg-gray-800 rounded-lg border border-gray-700 p-4"><h2 class="text-sm font-bold text-purple-400 mb-2">Live Scanner</h2><div id="scanner-body" class="text-xs text-gray-400">Loading...</div></div>
                 <div class="bg-gray-800 rounded-lg border border-gray-700 p-4"><h2 class="text-sm font-bold text-green-400 mb-2">Live Positions</h2><div id="positions-body" class="text-xs text-gray-400">Loading...</div></div>
             </div>
         </div>
     </div>
     
-    <!-- Include existing AJAX Script here -->
     <script>
         function updateDashboard() {
             fetch('/dashboard/?format=json', {headers: {'X-Requested-With': 'XMLHttpRequest'}})
             .then(r => r.json())
             .then(data => {
-                // Populate tables (Shortened for brevity, use previous full script)
-                document.getElementById('scanner-body').innerHTML = data.scanner.length ? data.scanner.map(s => `<div>${s.symbol} : ${s.status}</div>`).join('') : 'Scanning...';
+                document.getElementById('scanner-body').innerHTML = data.scanner.length ? data.scanner.map(s => `<div>${s.symbol}</div>`).join('') : 'Scanning...';
                 document.getElementById('positions-body').innerHTML = data.positions.length ? data.positions.map(p => `<div>${p.symbol}</div>`).join('') : 'No positions';
             });
         }
