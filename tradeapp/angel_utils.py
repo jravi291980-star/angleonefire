@@ -8,7 +8,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
-# --- SHARED REDIS CONNECTION HELPER ---
 def get_redis_client():
     redis_url = os.environ.get('REDIS_URL')
     if redis_url:
@@ -54,7 +53,6 @@ class AngelConnect:
             book = self.client.orderBook()
             if not book or 'data' not in book:
                 return None
-            
             for order in book['data']:
                 if order['orderid'] == order_id:
                     return {
@@ -70,23 +68,29 @@ class AngelConnect:
 
     def get_historical_data(self, token, interval="ONE_DAY"):
         """
-        Fetches historical data.
-        FIX: Hardcodes time to 09:15 to prevent AB1004 errors on Daily Candles.
+        Fetches historical data with STRICT time formatting.
+        Format must be: yyyy-MM-dd 09:15 to yyyy-MM-dd 15:30
         """
         try:
-            now = datetime.now()
-            # CRITICAL FIX: Force time to 09:15 for Daily Candles
-            # This matches Angel One's database indexing for ONE_DAY interval
-            to_date = now.replace(hour=9, minute=15, second=0)
-            from_date = to_date - timedelta(days=10) # Get last 10 days
+            today = datetime.now()
+            
+            # We fetch the last 5 days to automatically handle weekends/holidays.
+            # If we only asked for "yesterday", it would fail on Mondays.
+            from_date_obj = today - timedelta(days=5)
+            
+            # Formatting as per Official Doc: '%Y-%m-%d %H:%M'
+            # Timestamps MUST be 09:15 and 15:30
+            from_str = from_date_obj.strftime("%Y-%m-%d 09:15")
+            to_str = today.strftime("%Y-%m-%d 15:30")
             
             params = {
                 "exchange": "NSE",
                 "symboltoken": token,
                 "interval": interval,
-                "fromdate": from_date.strftime("%Y-%m-%d %H:%M"), 
-                "todate": to_date.strftime("%Y-%m-%d %H:%M")
+                "fromdate": from_str,
+                "todate": to_str
             }
+            
             data = self.client.getCandleData(params)
             return data['data'] if data and 'data' in data else None
         except Exception as e:
