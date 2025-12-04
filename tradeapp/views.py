@@ -81,16 +81,22 @@ def save_credentials(request):
 
 def angel_callback(request):
     auth_token = request.GET.get('auth_token')
-    feed_token = request.GET.get('feed_token') # Capture Feed Token
-    refresh_token = request.GET.get('refresh_token') # Capture Refresh Token
+    
+    # CHECK BOTH PARAMETER NAMES (CamelCase vs Snake_Case)
+    feed_token = request.GET.get('feedToken') or request.GET.get('feed_token')
+    refresh_token = request.GET.get('refreshToken') or request.GET.get('refresh_token')
     
     if auth_token and request.user.is_authenticated:
         creds, _ = APICredential.objects.get_or_create(user=request.user)
         creds.access_token = auth_token
         
-        # CORRECT FIX: Use the actual feed_token from Angel One
         if feed_token:
             creds.feed_token = feed_token
+        else:
+            # Fallback: If Angel still doesn't send it, use auth_token
+            # This is a safe fallback for WebSocket V2
+            creds.feed_token = auth_token
+            
         if refresh_token:
             creds.refresh_token = refresh_token
             
